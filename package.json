@@ -15,7 +15,7 @@
     "db:setup": "tsx db/setup.ts",
     "db:seed": "tsx db/seed/seed.ts",
     "db:reset": "tsx db/setup.ts --reset && npm run db:seed",
-    "test": "node --test --experimental-strip-types tests/**/*.test.ts",
+    "test": "node --test --experimental-strip-types \"tests/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
