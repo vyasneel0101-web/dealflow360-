@@ -6,6 +6,7 @@ import { query, queryOne, type Queryable } from "../lib/db.ts";
 import type {
   Cents,
   CurrencyCode,
+  Customer,
   CustomerTier,
   Id,
   Percent,
@@ -100,6 +101,35 @@ export function updateTier(
     [id, input.name ?? null, input.max_discount_pct ?? null, input.sort_order ?? null],
     client,
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customers
+//
+// Read-only for now: a rep needs the list to open a quotation against someone.
+// Customer administration is not a screen the wireframe draws.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CustomerRow extends Omit<Customer, "archived_at"> {
+  archived_at: Date | null;
+}
+
+export async function listCustomers(
+  includeArchived: boolean,
+  client?: Queryable,
+): Promise<Customer[]> {
+  const rows = await query<CustomerRow>(
+    `SELECT c.id, c.name, c.tier_id, t.name AS tier_name,
+            t.max_discount_pct AS tier_max_discount_pct,
+            c.email, c.currency, c.archived_at
+       FROM customers c
+       JOIN customer_tiers t ON t.id = c.tier_id
+      WHERE ($1::boolean OR c.archived_at IS NULL)
+      ORDER BY c.name`,
+    [includeArchived],
+    client,
+  );
+  return rows.map((row) => ({ ...row, archived_at: row.archived_at?.toISOString() ?? null }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

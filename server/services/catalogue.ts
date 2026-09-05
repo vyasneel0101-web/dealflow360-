@@ -145,6 +145,10 @@ export async function removeVariant(productId: Id, variantId: Id): Promise<void>
 // Categories & tiers — the ceilings the risk engine reads
 // ─────────────────────────────────────────────────────────────────────────────
 
+export function listCustomers(includeArchived: boolean) {
+  return repo.listCustomers(includeArchived);
+}
+
 export function listCategories(): Promise<ProductCategory[]> {
   return repo.listCategories();
 }

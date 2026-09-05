@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { AppShell } from "./app/AppShell";
 import { Login } from "./screens/Login";
+import { Quotations } from "./screens/Quotations";
+import { QuotationBuilder } from "./screens/QuotationBuilder";
 import { useAuth } from "./lib/auth";
 import { matchPath, useRouter } from "./lib/router";
 import { EmptyState, Button } from "@ui/index";
@@ -52,15 +54,25 @@ export function App() {
 
   return (
     <AppShell onReloadData={() => setReloadKey((k) => k + 1)}>
-      <div key={reloadKey}>
-        {route ? (
-          <Placeholder title={route.title} slice={route.slice} />
-        ) : (
-          <NotFound path={path} />
-        )}
-      </div>
+      {/* `reloadKey` remounts the subtree, which is what B1.2's Reload Data
+          does: refetch everything from the server rather than trusting what is
+          already on screen. */}
+      <div key={reloadKey}>{renderRoute(path, route)}</div>
     </AppShell>
   );
+}
+
+/** Built screens first; anything still stubbed falls through to Placeholder. */
+function renderRoute(
+  path: string,
+  route: { pattern: string; title: string; slice: string } | undefined,
+) {
+  const builder = matchPath("/quotations/:id", path);
+  if (builder?.id) return <QuotationBuilder id={Number(builder.id)} />;
+  if (matchPath("/quotations", path)) return <Quotations />;
+
+  if (!route) return <NotFound path={path} />;
+  return <Placeholder title={route.title} slice={route.slice} />;
 }
 
 /** Replaced by a real screen as each slice lands. */

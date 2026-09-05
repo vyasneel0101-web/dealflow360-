@@ -231,6 +231,17 @@ catalogueRouter.patch(
   }),
 );
 
+/** Any internal user: a rep cannot open a quotation without picking someone. */
+catalogueRouter.get(
+  "/customers",
+  readAccess,
+  validateQuery(object({ include_archived: bool() })),
+  asyncRoute(async (req, res) => {
+    const { include_archived } = req.query as never as { include_archived?: boolean };
+    sendData(res, await catalogue.listCustomers(include_archived ?? false));
+  }),
+);
+
 catalogueRouter.get(
   "/tiers",
   readAccess,

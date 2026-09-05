@@ -163,6 +163,26 @@ describe("A2.1 — product CRUD", { skip: !seeded }, () => {
   });
 });
 
+describe("customers", { skip: !seeded }, () => {
+  test("any internal user can list them — a rep cannot quote without one", async () => {
+    const res = await call<ApiSuccess<{ name: string; tier_name: string }[]>>(
+      api(),
+      "GET",
+      "/api/customers",
+      { token: await actor("rep") },
+    );
+    assert.equal(res.status, 200);
+    const acme = res.body.data.find((c) => c.name === "Acme Corp");
+    // The tier ceiling comes with it, so the picker can show what a customer
+    // is allowed before a line is ever added.
+    assert.equal(acme?.tier_name, "Gold");
+  });
+
+  test("a session is still required", async () => {
+    assert.equal((await call(api(), "GET", "/api/customers")).status, 401);
+  });
+});
+
 describe("A2.6 — subscription products must be billable", { skip: !seeded }, () => {
   test("a subscription without an interval is refused with a readable message", async () => {
     const token = await actor("admin");
