@@ -7,9 +7,10 @@
  * claim in a document that nothing checks is a claim that quietly stops being
  * true around hour nine.
  */
-import { after, describe, test } from "node:test";
+import { after, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { closePool, query, queryOne } from "../server/lib/db.ts";
+import { resetRateLimits } from "../server/middleware/rateLimit.ts";
 import { generateToken, hashToken } from "../server/lib/crypto.ts";
 import { env } from "../server/lib/env.ts";
 import {
@@ -49,6 +50,18 @@ function api(): Harness {
   if (harness === null) throw new Error("harness not started");
   return harness;
 }
+
+/**
+ * The rate limiter is process-global state, and every test here signs up from
+ * the same 127.0.0.1. Without this, the suite trips its own signup limit and
+ * later tests fail with a 429 that has nothing to do with what they assert.
+ *
+ * Clearing it everywhere would leave the limiter untested, so there is a
+ * dedicated suite below that lets it fire on purpose.
+ */
+beforeEach(() => {
+  resetRateLimits();
+});
 
 after(async () => {
   if (!available) {
@@ -258,5 +271,63 @@ describe("error shape", { skip: !available }, () => {
     const body = (await res.json()) as ApiError;
     assert.equal(res.status, 400);
     assert.equal("stack" in body.error, false);
+  });
+});
+
+describe("rate limiting", { skip: !available }, () => {
+  test("credential stuffing against one account is cut off", async () => {
+    const address = uniqueEmail("stuffing");
+    await signup(address);
+
+    // The login limiter allows 10 attempts per five minutes, keyed per IP AND
+    // per email. Walking a password list past that must stop working.
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const res = await call<ApiError>(api(), "POST", "/api/auth/login", {
+        body: { email: address, password: `guess-number-${attempt}` },
+      });
+      statuses.push(res.status);
+    }
+
+    assert.equal(statuses.includes(429), true, "the limiter never fired");
+    // The cut-off is durable, not a single blocked request.
+    assert.equal(statuses.at(-1), 429);
+  });
+
+  test("a 429 tells the client when to come back", async () => {
+    const address = uniqueEmail("retryafter");
+    await signup(address);
+
+    let last: Response | null = null;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      last = await fetch(`${api().url}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: address, password: "wrong" }),
+      });
+      if (last.status === 429) break;
+    }
+
+    assert.equal(last?.status, 429);
+    assert.ok(Number(last?.headers.get("retry-after")) > 0);
+  });
+
+  test("the limiter keys on the normalised email, so case cannot bypass it", async () => {
+    const address = uniqueEmail("casebypass");
+    await signup(address);
+
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      await call(api(), "POST", "/api/auth/login", {
+        body: { email: address, password: "wrong" },
+      });
+    }
+
+    // Same account, different capitalisation. Validation runs before the
+    // limiter precisely so this shares the exhausted budget rather than
+    // getting a fresh one.
+    const res = await call<ApiError>(api(), "POST", "/api/auth/login", {
+      body: { email: address.toUpperCase(), password: "wrong" },
+    });
+    assert.equal(res.status, 429);
   });
 });
