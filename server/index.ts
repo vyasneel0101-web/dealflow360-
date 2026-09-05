@@ -31,6 +31,21 @@ async function main(): Promise<void> {
     log.info("API listening", { port: env.port, env: env.nodeEnv, production: isProduction });
   });
 
+  // Same reasoning as the database check above: a port already in use is the
+  // single most common startup failure, and an unhandled 'error' event prints a
+  // Node stack trace that buries the one fact that matters.
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EADDRINUSE") {
+      console.error(
+        `\nPort ${env.port} is already in use — most likely an API server that is still running.\n` +
+          "Stop it, or set PORT to something else in .env.\n",
+      );
+      process.exit(1);
+    }
+    log.error("Server error", error);
+    process.exit(1);
+  });
+
   // Ctrl-C mid-demo should not leave a connection pool holding rows.
   const shutdown = (signal: string) => {
     log.info("Shutting down", { signal });

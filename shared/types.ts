@@ -269,6 +269,88 @@ export interface DealHealthConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Catalogue requests
+//
+// Note what is absent from every shape below: no `id`, no `archived_at`, no
+// computed field. Those are set by services, and the validator rejects an
+// unknown key outright rather than ignoring it (TRD.md §3).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A2.1 — the six fields the PS names, plus the ones margin and billing need. */
+export interface CreateProductRequest {
+  name: string;
+  category_id: Id;
+  base_price_cents: Cents;
+  /** Not optional: without it there is no margin, and B3.4/B5.2/A6.3 die. */
+  cost_cents: Cents;
+  unit: string;
+  tax_pct?: Percent;
+  description?: string | null;
+  /** A2.6 — reveals the interval field in the UI when true. */
+  is_subscription?: boolean;
+  recurring_interval?: RecurringInterval | null;
+  qty_on_hand?: number;
+  is_promoted?: boolean;
+}
+
+export type UpdateProductRequest = Partial<CreateProductRequest>;
+
+/** A2.2 — one row per attribute, matching wireframe screen 17's table. */
+export interface CreateVariantRequest {
+  attribute: string;
+  values: string;
+  extra_price_cents?: Cents;
+}
+
+export interface CreateCategoryRequest {
+  name: string;
+  /** The category ceiling half of the per-line limit (A3.2). */
+  max_discount_pct: Percent;
+}
+
+export type UpdateCategoryRequest = Partial<CreateCategoryRequest>;
+
+export interface CreateTierRequest {
+  name: string;
+  max_discount_pct: Percent;
+  sort_order?: number;
+}
+
+export type UpdateTierRequest = Partial<CreateTierRequest>;
+
+/** A2.3 / A2.5 — the rule is a stored formula, not a per-product price table. */
+export interface CreatePriceListRequest {
+  name: string;
+  tier_id?: Id | null;
+  currency?: CurrencyCode;
+  rule_type: PriceRuleType;
+  rule_value?: number;
+}
+
+export type UpdatePriceListRequest = Partial<CreatePriceListRequest>;
+
+/** Step one of the three-step resolution: an explicit per-product override. */
+export interface UpsertPriceListItemRequest {
+  product_id: Id;
+  price_cents: Cents;
+}
+
+/**
+ * What `services/pricing.ts` returns, and what screen 4 renders. The steps are
+ * carried alongside the answer so the UI can explain WHY a price is what it is
+ * rather than just asserting it.
+ */
+export interface ResolvedPrice {
+  unit_price_cents: Cents;
+  unit_cost_cents: Cents;
+  /** Which of the three steps produced the price, in the order applied. */
+  source: "price_list_item" | "price_list_rule" | "base_price";
+  base_price_cents: Cents;
+  variant_extra_cents: Cents;
+  price_list_id: Id | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Warehouses & stock
 // ─────────────────────────────────────────────────────────────────────────────
 
