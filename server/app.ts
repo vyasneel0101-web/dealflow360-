@@ -9,6 +9,7 @@ import express, { type Express } from "express";
 import { errorHandler, notFoundHandler } from "./middleware/error.ts";
 import { authRouter } from "./routes/internal/auth.ts";
 import { catalogueRouter } from "./routes/internal/catalogue.ts";
+import { quotationsRouter } from "./routes/internal/quotations.ts";
 
 export function createApp(): Express {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp(): Express {
 
   app.use("/api/auth", authRouter);
   app.use("/api", catalogueRouter);
+  app.use("/api", quotationsRouter);
 
   // Anything under /api that matched no route is a 404 in the API's own error
   // shape, not Express's HTML page.

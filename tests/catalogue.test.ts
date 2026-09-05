@@ -11,12 +11,12 @@ import { closePool, query, queryOne } from "../server/lib/db.ts";
 import { resetRateLimits } from "../server/middleware/rateLimit.ts";
 import {
   call,
-  cleanupTestRows,
   databaseAvailable,
+  namespace,
   startHarness,
-  uniqueEmail,
   type Harness,
 } from "./helpers.ts";
+
 import type {
   ApiError,
   ApiSuccess,
@@ -28,6 +28,11 @@ import type {
   ProductCategory,
   ProductVariant,
 } from "../shared/types.ts";
+
+/** This file's private slice of the database — see helpers.ts. */
+const ns = namespace("cat");
+const uniqueEmail = ns.email;
+
 
 const available = await databaseAvailable();
 const harness: Harness | null = available ? await startHarness() : null;
@@ -71,9 +76,7 @@ after(async () => {
     await closePool();
     return;
   }
-  await query("DELETE FROM products WHERE name LIKE 'TEST %'");
-  await query("DELETE FROM price_lists WHERE name LIKE 'TEST %'");
-  await cleanupTestRows();
+  await ns.cleanup();
   await api().stop();
 });
 
@@ -107,7 +110,7 @@ async function makeProduct(token: string, name: string, extra: Record<string, un
 describe("A2.1 — product CRUD", { skip: !seeded }, () => {
   test("creates a product with all six PS fields and reads it back", async () => {
     const token = await actor("admin");
-    const created = await makeProduct(token, "TEST Widget", {
+    const created = await makeProduct(token, ns.name("Widget"), {
       tax_pct: 8,
       description: "A widget for testing.",
     });
@@ -120,7 +123,7 @@ describe("A2.1 — product CRUD", { skip: !seeded }, () => {
       { token },
     );
     assert.equal(fetched.status, 200);
-    assert.equal(fetched.body.data.name, "TEST Widget");
+    assert.equal(fetched.body.data.name, ns.name("Widget"));
     assert.equal(fetched.body.data.tax_pct, 8);
     // Joined from the category, which is what the risk engine will read.
     assert.equal(fetched.body.data.category_max_discount_pct, 15);
@@ -130,7 +133,7 @@ describe("A2.1 — product CRUD", { skip: !seeded }, () => {
     const token = await actor("admin");
     const res = await call<ApiError>(api(), "POST", "/api/products", {
       token,
-      body: { name: "TEST No Cost", category_id: hardwareId, base_price_cents: 1000, unit: "Each" },
+      body: { name: ns.name("No Cost"), category_id: hardwareId, base_price_cents: 1000, unit: "Each" },
     });
     assert.equal(res.status, 400);
     assert.ok(res.body.error.fields?.cost_cents);
@@ -138,7 +141,7 @@ describe("A2.1 — product CRUD", { skip: !seeded }, () => {
 
   test("a patch changes only what it sends", async () => {
     const token = await actor("admin");
-    const created = await makeProduct(token, "TEST Patchable");
+    const created = await makeProduct(token, ns.name("Patchable"));
     const id = created.body.data.id;
 
     const patched = await call<ApiSuccess<Product>>(api(), "PATCH", `/api/products/${id}`, {
@@ -149,7 +152,7 @@ describe("A2.1 — product CRUD", { skip: !seeded }, () => {
     assert.equal(patched.body.data.base_price_cents, 99_000);
     // Untouched fields survive.
     assert.equal(patched.body.data.cost_cents, 82_000);
-    assert.equal(patched.body.data.name, "TEST Patchable");
+    assert.equal(patched.body.data.name, ns.name("Patchable"));
   });
 
   test("an unknown product is a 404, and a non-numeric id is too", async () => {
@@ -166,7 +169,7 @@ describe("A2.6 — subscription products must be billable", { skip: !seeded }, (
     const res = await call<ApiError>(api(), "POST", "/api/products", {
       token,
       body: {
-        name: "TEST Unbillable",
+        name: ns.name("Unbillable"),
         category_id: hardwareId,
         base_price_cents: 1000,
         cost_cents: 500,
@@ -181,7 +184,7 @@ describe("A2.6 — subscription products must be billable", { skip: !seeded }, (
 
   test("turning a product into a subscription mid-edit is checked too", async () => {
     const token = await actor("admin");
-    const created = await makeProduct(token, "TEST Becomes Sub");
+    const created = await makeProduct(token, ns.name("Becomes Sub"));
     const res = await call<ApiError>(
       api(),
       "PATCH",
@@ -195,7 +198,7 @@ describe("A2.6 — subscription products must be billable", { skip: !seeded }, (
 
   test("a subscription with an interval is accepted", async () => {
     const token = await actor("admin");
-    const res = await makeProduct(token, "TEST Billable Sub", {
+    const res = await makeProduct(token, ns.name("Billable Sub"), {
       is_subscription: true,
       recurring_interval: "monthly",
     });
@@ -207,7 +210,8 @@ describe("A2.6 — subscription products must be billable", { skip: !seeded }, (
 describe("A2.4 — archive, never delete", { skip: !seeded }, () => {
   test("archiving hides a product from the default list but keeps the row", async () => {
     const token = await actor("admin");
-    const created = await makeProduct(token, "TEST Archivable");
+    const archivableName = ns.name("Archivable");
+    const created = await makeProduct(token, archivableName);
     const id = created.body.data.id;
 
     await call(api(), "PATCH", `/api/products/${id}/archive`, { token, body: { archived: true } });
@@ -215,7 +219,7 @@ describe("A2.4 — archive, never delete", { skip: !seeded }, () => {
     const active = await call<ApiSuccess<Paginated<Product>>>(
       api(),
       "GET",
-      "/api/products?q=TEST%20Archivable",
+      `/api/products?q=${encodeURIComponent(archivableName)}`,
       { token },
     );
     assert.equal(active.body.data.items.length, 0);
@@ -223,7 +227,7 @@ describe("A2.4 — archive, never delete", { skip: !seeded }, () => {
     const withArchived = await call<ApiSuccess<Paginated<Product>>>(
       api(),
       "GET",
-      "/api/products?q=TEST%20Archivable&include_archived=true",
+      `/api/products?q=${encodeURIComponent(archivableName)}&include_archived=true`,
       { token },
     );
     assert.equal(withArchived.body.data.items.length, 1);
@@ -238,7 +242,7 @@ describe("A2.4 — archive, never delete", { skip: !seeded }, () => {
 
   test("archiving is reversible", async () => {
     const token = await actor("admin");
-    const created = await makeProduct(token, "TEST Restorable");
+    const created = await makeProduct(token, ns.name("Restorable"));
     const id = created.body.data.id;
     await call(api(), "PATCH", `/api/products/${id}/archive`, { token, body: { archived: true } });
     const restored = await call<ApiSuccess<Product>>(api(), "PATCH", `/api/products/${id}/archive`, {
@@ -252,7 +256,7 @@ describe("A2.4 — archive, never delete", { skip: !seeded }, () => {
 describe("A2.2 — variants", { skip: !seeded }, () => {
   test("a variant is added and returned with the product", async () => {
     const token = await actor("admin");
-    const created = await makeProduct(token, "TEST With Variants");
+    const created = await makeProduct(token, ns.name("With Variants"));
     const id = created.body.data.id;
 
     const variant = await call<ApiSuccess<ProductVariant>>(
@@ -270,8 +274,8 @@ describe("A2.2 — variants", { skip: !seeded }, () => {
 
   test("deleting a variant through the wrong product is a 404", async () => {
     const token = await actor("admin");
-    const a = await makeProduct(token, "TEST Variant Owner");
-    const b = await makeProduct(token, "TEST Variant Stranger");
+    const a = await makeProduct(token, ns.name("Variant Owner"));
+    const b = await makeProduct(token, ns.name("Variant Stranger"));
 
     const variant = await call<ApiSuccess<ProductVariant>>(
       api(),
@@ -296,7 +300,7 @@ describe("A2.3 / A2.5 — price lists are formulas", { skip: !seeded }, () => {
     const token = await actor("admin");
     const res = await call<ApiSuccess<PriceList>>(api(), "POST", "/api/price-lists", {
       token,
-      body: { name: "TEST Ten Off", rule_type: "percent_off", rule_value: 10 },
+      body: { name: ns.name("Ten Off"), rule_type: "percent_off", rule_value: 10 },
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     assert.equal(res.body.data.rule_type, "percent_off");
@@ -307,7 +311,7 @@ describe("A2.3 / A2.5 — price lists are formulas", { skip: !seeded }, () => {
     const token = await actor("admin");
     const res = await call<ApiError>(api(), "POST", "/api/price-lists", {
       token,
-      body: { name: "TEST Impossible", rule_type: "percent_off", rule_value: 150 },
+      body: { name: ns.name("Impossible"), rule_type: "percent_off", rule_value: 150 },
     });
     // 422, not 400, and that distinction is real: 150 is a perfectly valid
     // rule_value for a `fixed` rule ($150). The validator cannot range-check
@@ -323,9 +327,9 @@ describe("A2.3 / A2.5 — price lists are formulas", { skip: !seeded }, () => {
     const token = await actor("admin");
     const list = await call<ApiSuccess<PriceList>>(api(), "POST", "/api/price-lists", {
       token,
-      body: { name: "TEST Upsertable", rule_type: "none" },
+      body: { name: ns.name("Upsertable"), rule_type: "none" },
     });
-    const product = await makeProduct(token, "TEST Overridden");
+    const product = await makeProduct(token, ns.name("Overridden"));
 
     const first = await call(api(), "PUT", `/api/price-lists/${list.body.data.id}/items`, {
       token,
@@ -346,12 +350,12 @@ describe("A2.3 / A2.5 — price lists are formulas", { skip: !seeded }, () => {
 
 describe("PRD §3 — the permission matrix is enforced server-side", { skip: !seeded }, () => {
   test("a rep cannot create a product", async () => {
-    const res = await makeProduct(await actor("rep"), "TEST Rep Product");
+    const res = await makeProduct(await actor("rep"), ns.name("Rep Product"));
     assert.equal(res.status, 403);
   });
 
   test("a manager cannot create a product either — that is admin config", async () => {
-    const res = await makeProduct(await actor("manager"), "TEST Manager Product");
+    const res = await makeProduct(await actor("manager"), ns.name("Manager Product"));
     assert.equal(res.status, 403);
   });
 
@@ -364,16 +368,15 @@ describe("PRD §3 — the permission matrix is enforced server-side", { skip: !s
     const token = await actor("manager");
     const res = await call<ApiSuccess<ProductCategory>>(api(), "POST", "/api/tiers", {
       token,
-      body: { name: `TEST Tier ${Date.now()}`, max_discount_pct: 12 },
+      body: { name: ns.uniqueName("Tier"), max_discount_pct: 12 },
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    await query("DELETE FROM customer_tiers WHERE name LIKE 'TEST Tier%'");
   });
 
   test("a rep cannot configure discount tiers", async () => {
     const res = await call(api(), "POST", "/api/tiers", {
       token: await actor("rep"),
-      body: { name: "TEST Rep Tier", max_discount_pct: 99 },
+      body: { name: ns.name("Rep Tier"), max_discount_pct: 99 },
     });
     assert.equal(res.status, 403);
   });
@@ -390,7 +393,7 @@ describe("mass assignment", { skip: !seeded }, () => {
     const res = await call<ApiError>(api(), "POST", "/api/products", {
       token,
       body: {
-        name: "TEST Sneaky",
+        name: ns.name("Sneaky"),
         category_id: hardwareId,
         base_price_cents: 1000,
         cost_cents: 500,

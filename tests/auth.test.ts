@@ -15,13 +15,18 @@ import { generateToken, hashToken } from "../server/lib/crypto.ts";
 import { env } from "../server/lib/env.ts";
 import {
   call,
-  cleanupTestRows,
   databaseAvailable,
+  namespace,
   startHarness,
-  uniqueEmail,
   type Harness,
 } from "./helpers.ts";
+
 import type { ApiError, ApiSuccess, AuthResponse, Id, User } from "../shared/types.ts";
+
+/** This file's private slice of the database — see helpers.ts. */
+const ns = namespace("auth");
+const uniqueEmail = ns.email;
+
 
 const PASSWORD = "a-long-enough-test-password";
 
@@ -40,7 +45,7 @@ if (!available) {
       "  Run `npm run db:setup` first.\n",
   );
 } else {
-  await cleanupTestRows();
+  await ns.cleanup();
 }
 
 const harness: Harness | null = available ? await startHarness() : null;
@@ -68,7 +73,7 @@ after(async () => {
     await closePool();
     return;
   }
-  await cleanupTestRows();
+  await ns.cleanup();
   await api().stop();
 });
 
@@ -177,12 +182,12 @@ describe("PS §7 — the two realms are disjoint", { skip: !available }, () => {
     const tier = await queryOne<{ id: Id }>(
       `INSERT INTO customer_tiers (name, max_discount_pct, sort_order)
        VALUES ($1, 10, 99) RETURNING id`,
-      [`TEST tier ${Date.now()}`],
+      [ns.uniqueName("tier")],
     );
     assert.ok(tier);
     const customer = await queryOne<{ id: Id }>(
       "INSERT INTO customers (name, tier_id) VALUES ($1, $2) RETURNING id",
-      [`TEST Customer ${Date.now()}`, tier.id],
+      [ns.uniqueName("Customer"), tier.id],
     );
     assert.ok(customer);
     const contact = await queryOne<{ id: Id }>(
